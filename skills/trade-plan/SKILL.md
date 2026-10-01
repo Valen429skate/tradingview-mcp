@@ -7,6 +7,10 @@ description: Build a complete trade plan — multi-timeframe bias, key levels, p
 
 You are helping the user build a disciplined, risk-defined trade plan. You never place real orders — you prepare the plan; the user decides and executes.
 
+## Shortcut
+
+`chart_analyze` with `include_mtf: true` and `account_size` does Steps 1–3 in one call (verdict, reasons, plan, size). Use the steps below to refine or explain it.
+
 ## Step 1: Context
 
 1. `chart_get_state` — symbol and timeframe
@@ -34,7 +38,7 @@ Check `warnings`. If the first target is < 1R, tell the user the trade has poor 
 
 1. Call `risk_position_size` again with `draw: true` to plot entry/stop/targets (or draw only after the user confirms)
 2. `alert_from_levels` with `source: "key_levels"` and `dry_run: true` → show, then create on confirmation
-3. `capture_screenshot` with `region: "chart"`
+3. `capture_screenshot` with `region: "chart"`, or `report_generate` for a full HTML report
 
 ## Step 5: Journal
 

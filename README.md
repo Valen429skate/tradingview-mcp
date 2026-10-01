@@ -69,6 +69,10 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
 - **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
+- **One-call analysis** — `chart_analyze` combines trend, structure, momentum, candle patterns and levels into a −100…+100 confluence score with the reasons and a ready trade plan
+- **Local backtester** — test ideas like `ema_20 crosses_above ema_50` with ATR stops and R targets in milliseconds, no Pine Script
+- **Visual reports** — `report_generate` writes a self-contained interactive HTML report (chart, levels, verdict, backtest equity curve)
+- **Candlestick patterns** — engulfing, hammer, stars, soldiers/crows, inside/outside bars + market structure (HH/HL, break of structure)
 - **Local analysis** — compute RSI/ATR/EMA/BB/MACD/VWAP from bars, auto-detect support/resistance and pivots, multi-timeframe trend alignment, symbol correlation
 - **Screener** — scan symbols or your watchlist with conditions like `rsi < 30 and close > ema200`
 - **Risk management** — position sizing with R-multiple targets, ATR stops and futures point values; draw the plan on the chart
@@ -172,6 +176,9 @@ tv mtf -t W,D,240,60               # multi-timeframe trend
 tv scan AAPL MSFT NVDA -c "rsi < 30 and close > ema200"
 tv risk -a 10000 -r 1 -e 100 -s 98 # position size
 tv journal stats                   # trading performance
+tv analyze --mtf -a 10000          # full analysis + plan
+tv backtest -e "ema_9 crosses_above ema_21" -x "ema_9 crosses_below ema_21" --stop-atr 2
+tv report                          # HTML report in reports/
 ```
 
 ### All Commands
@@ -195,6 +202,7 @@ tv screenshot / discover / ui-state / range / scroll
 tv compute / levels / mtf / correlation / scan / risk / export / optimize
 tv alert levels
 tv journal add/update/delete/list/stats
+tv analyze / patterns / backtest / report
 ```
 
 ## Streaming
@@ -231,6 +239,10 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
+| "Analyze my chart" / "Should I buy?" | `chart_analyze` (confluence score + plan) |
+| "Would buying EMA crosses have worked?" | `backtest_run` |
+| "Make me a report" | `report_generate` |
+| "Any candle patterns?" | `data_detect_patterns` |
 | "Where are support and resistance?" | `data_get_key_levels` |
 | "Is the trend aligned across timeframes?" | `chart_multi_timeframe` |
 | "Find oversold stocks in my watchlist" | `batch_scan` with `condition: "rsi < 30"` |
@@ -239,7 +251,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Log this trade" / "How am I doing?" | `journal_add` / `journal_stats` |
 | "Find the best EMA length for my strategy" | `strategy_optimize` |
 
-## Tool Reference (98 MCP tools)
+## Tool Reference (102 MCP tools)
 
 ### Chart Reading
 
@@ -337,6 +349,10 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 
 | Tool | What it does |
 |------|-------------|
+| `chart_analyze` | **Start here.** Trend + structure + momentum + patterns + levels (+ optional higher timeframes) → confluence score −100…+100, the reasons, and a plan (entry, stop beyond a level or ATR, targets at the next levels, optional size) |
+| `backtest_run` | Local rule backtester: `entry` / `exit` rules (`crosses_above`, `and`/`or`, ema_N, rsi_N, highest_N…), `stop_atr`/`stop_pct`, `target_r`/`target_pct`, `max_bars`, risk-based sizing, commission. Fills next bar open, stop before target |
+| `report_generate` | Self-contained interactive HTML report in `reports/` — chart with EMAs, S/R, patterns, trades; verdict and reasons; plan; backtest equity curve (light/dark, mobile) |
+| `data_detect_patterns` | 11 candlestick patterns (context-aware) + market structure: HH/HL vs LH/LL, break of structure |
 | `data_compute` | Compute sma/ema/rsi/atr/stdev/vwap/bb/macd from chart bars (no indicator on chart needed) |
 | `data_get_key_levels` | Previous day/bar H/L/C, classic pivots, swing support/resistance zones with touch counts |
 | `chart_multi_timeframe` | Trend, RSI, ATR, EMAs per timeframe + alignment bias (restores timeframe) |
@@ -381,11 +397,14 @@ The key flag: `--remote-debugging-port=9222`
 # Unit tests — no TradingView needed (runs in CI)
 npm run test:unit
 
+# See a sample HTML report without TradingView (synthetic data)
+node scripts/demo-report.js   # → reports/demo_report.html
+
 # End-to-end — requires TradingView running with --remote-debugging-port=9222
 npm test
 ```
 
-Unit tests cover Pine Script static analysis, CLI routing, input sanitization, replay, launch, indicator/history handling, and the analysis toolkit (indicator math, key levels, screener, risk, journal, export, optimizer).
+Unit tests cover Pine Script static analysis, the backtester's execution model (next-bar fills, stop-before-target, gaps, sizing), candle patterns, confluence scoring, HTML report generation, CLI routing, input sanitization, replay, launch, indicator/history handling, and the analysis toolkit (indicator math, key levels, screener, risk, journal, export, optimizer).
 
 ## Architecture
 
@@ -393,7 +412,7 @@ Unit tests cover Pine Script static analysis, CLI routing, input sanitization, r
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (98 tools) + CLI (`tv` command, 38 commands)
+- **Transport**: MCP over stdio (102 tools) + CLI (`tv` command, 42 commands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

@@ -20,3 +20,7 @@ export * as risk from './risk.js';
 export * as journal from './journal.js';
 export * as exporter from './export.js';
 export * as optimizer from './optimize.js';
+export * as patterns from './patterns.js';
+export * as backtest from './backtest.js';
+export * as insight from './insight.js';
+export * as report from './report.js';

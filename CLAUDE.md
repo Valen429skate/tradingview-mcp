@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-98 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+102 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -24,7 +24,19 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `data_get_ohlcv` without summary → all bars (use `count` to limit, default 100)
 - `quote_get` → single latest price snapshot
 
-### "Analyze my chart" (full report workflow)
+### "Analyze my chart" / "Should I buy?" — START HERE
+- `chart_analyze` → one call: verdict + confluence score (−100…+100), bullish/bearish reasons, suggested plan. Add `include_mtf: true` for higher-timeframe alignment and `account_size` for position size. Explain the reasons to the user; never present it as financial advice.
+- `report_generate` → visual HTML report (give the user the file path)
+
+### "Would this strategy idea have worked?"
+- `backtest_run` with `entry` / `exit` rules, e.g. entry `"ema_20 crosses_above ema_50 and rsi_14 < 70"`, exit `"close crosses_below ema_20"`, `stop_atr: 2`, `target_r: 3`
+- Compare `net_profit_pct` against `buy_hold_pct`; flag < 20 trades as not significant; results are in-sample (≤500 bars)
+- To turn a good rule set into a real strategy: write it in Pine (`pine_set_source`) and verify with `data_get_strategy_results`
+
+### "Any candle patterns / what's the structure?"
+- `data_detect_patterns` → recent patterns with bias + market structure (HH/HL, LH/LL, break of structure)
+
+### "Analyze my chart" (manual deep-dive workflow)
 1. `quote_get` → current price
 2. `data_get_study_values` → all indicator readings
 3. `data_get_pine_lines` → key price levels from custom indicators
@@ -134,6 +146,9 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `chart_multi_timeframe` | ~1-2 KB |
 | `batch_scan` | ~300 bytes per symbol |
 | `risk_position_size` | ~700 bytes |
+| `chart_analyze` | ~2-3 KB |
+| `backtest_run` | ~3-6 KB (20 trades + 60-pt equity curve) |
+| `report_generate` | ~300 bytes (returns file path) |
 
 ## Tool Conventions
 
