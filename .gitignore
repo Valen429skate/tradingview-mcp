@@ -8,3 +8,4 @@ rules.json
 exports/
 journal/
 reports/
+.mcp.json
