@@ -10,9 +10,12 @@
  * 2. Also registers it user-wide with `claude mcp add --scope user` when the
  *    claude CLI is on PATH (so it works from any folder).
  * 3. Starts the server once and confirms it lists its tools.
- * 4. Checks whether TradingView is reachable on the debug port.
+ * 4. Installs the skills (skills/*) and agents (agents/*) into ~/.claude so
+ *    Claude Code can use them from any folder.
+ * 5. Checks whether TradingView is reachable on the debug port.
  */
-import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, cpSync, readdirSync } from 'fs';
+import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn, spawnSync } from 'child_process';
@@ -47,6 +50,26 @@ if (which.status === 0) {
   else warn(`No se pudo registrar con el comando claude (no pasa nada, .mcp.json alcanza): ${(add.stderr || '').trim().split('\n')[0]}`);
 } else {
   info('Comando "claude" no encontrado: se usa .mcp.json (abre Claude Code en esta carpeta).');
+}
+
+// 2b. Skills + agents → ~/.claude (user scope: available in every folder)
+const claudeHome = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+try {
+  const skillsSrc = join(ROOT, 'skills');
+  const skills = readdirSync(skillsSrc, { withFileTypes: true }).filter(d => d.isDirectory() && existsSync(join(skillsSrc, d.name, 'SKILL.md'))).map(d => d.name);
+  mkdirSync(join(claudeHome, 'skills'), { recursive: true });
+  for (const name of skills) cpSync(join(skillsSrc, name), join(claudeHome, 'skills', name), { recursive: true, force: true });
+  ok(`${skills.length} skills instalados en ${join(claudeHome, 'skills')}`);
+  info(skills.map(n => '/' + n).join('  '));
+  const agentsSrc = join(ROOT, 'agents');
+  if (existsSync(agentsSrc)) {
+    const agents = readdirSync(agentsSrc).filter(f => f.endsWith('.md'));
+    mkdirSync(join(claudeHome, 'agents'), { recursive: true });
+    for (const f of agents) cpSync(join(agentsSrc, f), join(claudeHome, 'agents', f), { force: true });
+    ok(`${agents.length} agente(s) instalado(s) en ${join(claudeHome, 'agents')}`);
+  }
+} catch (err) {
+  warn(`No se pudieron instalar los skills: ${err.message}`);
 }
 
 // 3. Start the server and list tools over MCP stdio
@@ -91,4 +114,5 @@ console.log(`
        ${ROOT}
   3. Si te pregunta si confias en el servidor "tradingview", acepta.
   4. Escribe:  verifica la conexion con TradingView
+  5. Prueba los skills:  /precision-entry   /trade-plan   /strategy-lab
 `);

@@ -91,7 +91,7 @@ Requires [Node.js LTS](https://nodejs.org/), [Git](https://git-scm.com/downloads
 - **Windows:** download [`INSTALAR_WINDOWS.bat`](https://raw.githubusercontent.com/Valen429skate/tradingview-mcp/claude/abrir-tradingview-fl27vh/INSTALAR_WINDOWS.bat) and double-click it
 - **Mac:** download [`INSTALAR_MAC.command`](https://raw.githubusercontent.com/Valen429skate/tradingview-mcp/claude/abrir-tradingview-fl27vh/INSTALAR_MAC.command), then right-click → Open
 
-It downloads the code to `~/tradingview-mcp`, installs dependencies, connects the server to Claude Code (`scripts/setup.js`), verifies it, and launches TradingView with the debug port. Then open Claude Desktop → **Code** → **Local** → that folder, and say *"verifica la conexión con TradingView"*.
+It downloads the code to `~/tradingview-mcp`, installs dependencies, connects the server to Claude Code (`scripts/setup.js`), installs the 10 workflow skills and the agent into `~/.claude/` (so `/precision-entry`, `/trade-plan`, `/strategy-lab`… work from any folder), verifies it, and launches TradingView with the debug port. Re-run it (or `git pull && node scripts/setup.js`) to update. Then open Claude Desktop → **Code** → **Local** → that folder, and say *"verifica la conexión con TradingView"*.
 
 ## Install with Claude Code
 

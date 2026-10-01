@@ -16,6 +16,17 @@ Determine:
 
 ## Step 2: Run the Scan
 
+### Fast path: screener (preferred)
+`batch_scan` evaluates conditions on computed metrics for every symbol (or the open watchlist when `symbols` is omitted) and restores the chart:
+```
+symbols: ["AAPL", "MSFT", "NVDA", "AMZN"]
+condition: "adx > 25 and supertrend_dir == 1 and rsi < 70"
+sort_by: "-rel_volume"
+```
+Metrics include close, change_pct, rsi, atr_pct, ema20/50/200, sma*, bb_*, macd*, rel_volume, high_20/low_20, adx, plus_di, minus_di, supertrend_dir, stochrsi_k, chop, bb_width.
+Then for the best 2–3 matches: `chart_set_symbol` → `chart_analyze` → `entry_zones`.
+
+
 ### For Strategy Performance Comparison
 Use `batch_run` with action `get_strategy_results`:
 ```

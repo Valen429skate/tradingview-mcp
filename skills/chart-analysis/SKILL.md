@@ -5,6 +5,14 @@ description: Analyze a chart — set up symbol/timeframe, add indicators, scroll
 
 # Chart Analysis Workflow
 
+## Fast path (use this first)
+
+1. `chart_analyze` with `include_mtf: true` → verdict, confluence score (−100…+100), reasons, plan, regime, precise entry
+2. `entry_zones` → exact limit-order zone, stop and targets
+3. `report_generate` → visual HTML report for the user (give them the file path)
+
+Use the manual steps below only when the user wants specific indicators drawn on their chart.
+
 You are performing technical analysis on a TradingView chart.
 
 ## Step 1: Set Up the Chart
