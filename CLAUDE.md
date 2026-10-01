@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-102 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+109 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -28,9 +28,17 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `chart_analyze` → one call: verdict + confluence score (−100…+100), bullish/bearish reasons, suggested plan. Add `include_mtf: true` for higher-timeframe alignment and `account_size` for position size. Explain the reasons to the user; never present it as financial advice.
 - `report_generate` → visual HTML report (give the user the file path)
 
+### "Where exactly should I enter?" — PRECISE ENTRIES
+1. `market_regime` → trend / range / squeeze; follow its playbook (don't fade a strong trend, don't chase breakouts in a range)
+2. `entry_zones` (side auto/long/short) → confluence zones + limit plan. Present: entry zone and WHY (sources), stop, targets with R, the confirmation trigger. If `action` is `skip_poor_rr` or `no_setup`, say so plainly — no trade is a valid answer.
+3. Optional detail: `data_smart_money` (FVG/order blocks/sweeps), `data_volume_profile` (POC/VA), `data_fibonacci` (golden pocket), `data_divergences`
+4. `risk_position_size` with the plan's entry/stop (and `draw: true` to plot it)
+
 ### "Would this strategy idea have worked?"
 - `backtest_run` with `entry` / `exit` rules, e.g. entry `"ema_20 crosses_above ema_50 and rsi_14 < 70"`, exit `"close crosses_below ema_20"`, `stop_atr: 2`, `target_r: 3`
 - Compare `net_profit_pct` against `buy_hold_pct`; flag < 20 trades as not significant; results are in-sample (≤500 bars)
+- Trade management: `trail_atr` (chandelier trailing stop), `breakeven_r`
+- ALWAYS follow a promising backtest with `backtest_validate` (same args) and report its verdict + issues
 - To turn a good rule set into a real strategy: write it in Pine (`pine_set_source`) and verify with `data_get_strategy_results`
 
 ### "Any candle patterns / what's the structure?"
@@ -149,6 +157,10 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `chart_analyze` | ~2-3 KB |
 | `backtest_run` | ~3-6 KB (20 trades + 60-pt equity curve) |
 | `report_generate` | ~300 bytes (returns file path) |
+| `entry_zones` | ~3-5 KB |
+| `market_regime` | ~700 bytes |
+| `data_smart_money` | ~2-4 KB |
+| `backtest_validate` | ~2 KB |
 
 ## Tool Conventions
 

@@ -17,6 +17,7 @@ import { registerTabTools } from './tools/tab.js';
 import { registerAnalysisTools } from './tools/analysis.js';
 import { registerJournalTools } from './tools/journal.js';
 import { registerInsightTools } from './tools/insight.js';
+import { registerProTools } from './tools/pro.js';
 
 const server = new McpServer(
   {
@@ -25,7 +26,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 102 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 109 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -34,6 +35,12 @@ START HERE for "analyze my chart" / "should I buy?":
 - report_generate → visual HTML report file (chart, levels, verdict, optional backtest)
 - backtest_run → test rule ideas locally: entry "ema_20 crosses_above ema_50", exit "close crosses_below ema_20", stop_atr 2
 - data_detect_patterns → candlestick patterns + market structure (HH/HL, break of structure)
+
+PRECISE ENTRIES (professional):
+- entry_zones → confluence zones (S/R + fib + volume profile + FVG/order blocks + EMAs + VWAP…) → limit entry, stop, targets, R:R
+- market_regime → trending / ranging / squeeze + matching playbook
+- data_volume_profile (POC, value area), data_fibonacci (golden pocket), data_smart_money (FVG, order blocks, sweeps, equal highs/lows), data_divergences
+- backtest_validate → is the edge real? (consistency, Monte Carlo, sensitivity)
 
 Reading your chart:
 - chart_get_state → get symbol, timeframe, all indicator names + entity IDs (call first)
@@ -110,6 +117,7 @@ registerTabTools(server);
 registerAnalysisTools(server);
 registerJournalTools(server);
 registerInsightTools(server);
+registerProTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');

@@ -33,6 +33,12 @@ Always add risk: `stop_atr: 2` (or `stop_pct`) and a `target_r` or exit rule. Us
 - Re-test the best rules on 2–3 other symbols (`chart_set_symbol`) — if it only works on one, it's curve-fit
 - Commission: add `commission_pct: 0.05` (stocks/crypto) to see if the edge survives costs
 
+## Step 3b: Validate
+
+Run `backtest_validate` with the best rules. Report the verdict (robust / promising / fragile / no_edge), Monte Carlo probability of loss and 95th-percentile drawdown, and every listed issue. Only call something an edge if the verdict is robust or promising.
+
+Try trade management too: `trail_atr: 3` (let winners run) and `breakeven_r: 1` (cut scratch losses), and regime filters like `adx > 25` or `supertrend_dir == 1`.
+
 ## Step 4: Hand Off
 
 - `report_generate` with the winning `backtest` spec → visual report for the user

@@ -11,6 +11,10 @@ You are helping the user build a disciplined, risk-defined trade plan. You never
 
 `chart_analyze` with `include_mtf: true` and `account_size` does Steps 1–3 in one call (verdict, reasons, plan, size). Use the steps below to refine or explain it.
 
+## Step 0: Regime
+
+`market_regime` → pick the playbook: trend-follow pullbacks, fade range extremes, or trade the squeeze breakout. Say which one applies.
+
 ## Step 1: Context
 
 1. `chart_get_state` — symbol and timeframe
@@ -23,6 +27,10 @@ You are helping the user build a disciplined, risk-defined trade plan. You never
 1. `data_get_key_levels` — nearest support/resistance, pivots, previous day H/L
 2. If the user has custom level indicators: `data_get_pine_lines` with `study_filter`
 3. Pick a logical entry and a stop **beyond** a level (not at it). If no obvious level, use an ATR stop (`atr_multiplier: 1.5`).
+
+## Step 2b: Precise Entry
+
+`entry_zones` → the best confluence zone for a limit order, stop beyond it, targets at opposing zones. Prefer this entry over a market entry at the current price. If it returns `skip_poor_rr` / `no_setup`, recommend waiting — and say what price would make the trade valid.
 
 ## Step 3: Size the Position
 

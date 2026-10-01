@@ -24,3 +24,8 @@ export * as patterns from './patterns.js';
 export * as backtest from './backtest.js';
 export * as insight from './insight.js';
 export * as report from './report.js';
+export * as profile from './profile.js';
+export * as smc from './smc.js';
+export * as signals from './signals.js';
+export * as zones from './zones.js';
+export * as pro from './pro.js';

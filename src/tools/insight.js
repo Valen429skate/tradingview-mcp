@@ -11,7 +11,7 @@ const run = (fn) => async (args) => {
   catch (err) { return jsonResult({ success: false, error: err.message }, true); }
 };
 
-const RULE_HELP = 'Operands: numbers, open/high/low/close/volume, prev_close, sma_N, ema_N, rsi_N, atr_N, highest_N / lowest_N (previous N bars), bb_upper/middle/lower, macd, macd_signal, macd_hist, vwap, volume_sma_N. Ops: > >= < <= == != crosses_above crosses_below. Join with and / or.';
+const RULE_HELP = 'Operands: numbers, open/high/low/close/volume, prev_close, sma_N, ema_N, rsi_N, atr_N, highest_N / lowest_N (previous N bars), bb_upper/middle/lower, bb_width, macd, macd_signal, macd_hist, vwap, volume_sma_N, supertrend, supertrend_dir (1/-1), adx_N, plus_di, minus_di, stoch_k/d, stochrsi_k/d, obv, obv_ema_N, donchian_*, keltner_*, tenkan, kijun, senkou_a/b, chop_N, er_N. Ops: > >= < <= == != crosses_above crosses_below. Join with and / or.';
 
 export function registerInsightTools(server) {
   server.tool('chart_analyze', 'ONE-CALL full analysis of the current chart: trend, market structure, momentum, candle patterns, key levels (+ optional higher-timeframe alignment) combined into a confluence score (-100…+100) with the reasons, plus a suggested plan (entry, stop beyond a level or ATR, targets at next levels, optional position size). Start here for "analyze my chart" / "should I buy?".', {
@@ -44,6 +44,8 @@ export function registerInsightTools(server) {
     target_r: z.coerce.number().optional().describe('Take profit at n × initial risk (needs a stop)'),
     target_pct: z.coerce.number().optional().describe('Take profit at n %'),
     max_bars: z.coerce.number().optional().describe('Exit after n bars in the trade'),
+    trail_atr: z.coerce.number().optional().describe('Chandelier trailing stop: highest high since entry − ATR × n (long)'),
+    breakeven_r: z.coerce.number().optional().describe('Move the stop to entry once the trade is +n R (needs a stop)'),
     risk_percent: z.coerce.number().optional().describe('Size each trade to risk n % of equity (needs a stop). Default: all-in'),
     initial_capital: z.coerce.number().optional().describe('Default 10000'),
     commission_pct: z.coerce.number().optional().describe('Commission per side, % of notional (default 0)'),

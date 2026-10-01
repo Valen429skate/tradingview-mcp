@@ -69,6 +69,9 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
 - **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
+- **Precise entries** — `entry_zones` merges S/R, Fibonacci, volume profile, FVGs, order blocks, EMAs, VWAP bands, equal highs/lows and round numbers into scored confluence zones → limit entry, stop, targets and R:R check
+- **Professional toolkit** — volume profile (POC/value area), auto-Fibonacci (golden pocket), Smart Money Concepts (FVG, order blocks, liquidity sweeps), RSI/MACD/OBV divergences, market regime (ADX, Choppiness, squeeze) with the matching playbook; Supertrend, ADX/DMI, Stoch RSI, Ichimoku, Keltner, Donchian, OBV
+- **Backtest validation** — consistency split, Monte Carlo and parameter sensitivity → robust / fragile / no-edge verdict; trailing and breakeven stops
 - **One-call analysis** — `chart_analyze` combines trend, structure, momentum, candle patterns and levels into a −100…+100 confluence score with the reasons and a ready trade plan
 - **Local backtester** — test ideas like `ema_20 crosses_above ema_50` with ATR stops and R targets in milliseconds, no Pine Script
 - **Visual reports** — `report_generate` writes a self-contained interactive HTML report (chart, levels, verdict, backtest equity curve)
@@ -188,6 +191,9 @@ tv journal stats                   # trading performance
 tv analyze --mtf -a 10000          # full analysis + plan
 tv backtest -e "ema_9 crosses_above ema_21" -x "ema_9 crosses_below ema_21" --stop-atr 2
 tv report                          # HTML report in reports/
+tv zones                           # precise entry: confluence zones + limit plan
+tv regime                          # trend / range / squeeze + playbook
+tv validate -e "supertrend_dir crosses_above 0" --trail-atr 3
 ```
 
 ### All Commands
@@ -212,6 +218,7 @@ tv compute / levels / mtf / correlation / scan / risk / export / optimize
 tv alert levels
 tv journal add/update/delete/list/stats
 tv analyze / patterns / backtest / report
+tv zones / profile / fib / smc / divergences / regime / validate
 ```
 
 ## Streaming
@@ -248,7 +255,10 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
-| "Analyze my chart" / "Should I buy?" | `chart_analyze` (confluence score + plan) |
+| "Analyze my chart" / "Should I buy?" | `chart_analyze` (confluence score + plan + precise entry) |
+| "Where exactly should I enter?" | `entry_zones` |
+| "Is it trending or ranging?" | `market_regime` |
+| "Is this backtest real or luck?" | `backtest_validate` |
 | "Would buying EMA crosses have worked?" | `backtest_run` |
 | "Make me a report" | `report_generate` |
 | "Any candle patterns?" | `data_detect_patterns` |
@@ -260,7 +270,7 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Log this trade" / "How am I doing?" | `journal_add` / `journal_stats` |
 | "Find the best EMA length for my strategy" | `strategy_optimize` |
 
-## Tool Reference (102 MCP tools)
+## Tool Reference (109 MCP tools)
 
 ### Chart Reading
 
@@ -359,8 +369,15 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | Tool | What it does |
 |------|-------------|
 | `chart_analyze` | **Start here.** Trend + structure + momentum + patterns + levels (+ optional higher timeframes) → confluence score −100…+100, the reasons, and a plan (entry, stop beyond a level or ATR, targets at the next levels, optional size) |
-| `backtest_run` | Local rule backtester: `entry` / `exit` rules (`crosses_above`, `and`/`or`, ema_N, rsi_N, highest_N…), `stop_atr`/`stop_pct`, `target_r`/`target_pct`, `max_bars`, risk-based sizing, commission. Fills next bar open, stop before target |
+| `backtest_run` | Local rule backtester (now also `trail_atr` chandelier stop, `breakeven_r`, and series supertrend_dir, adx, stochrsi_k, obv, kijun, chop…): `entry` / `exit` rules (`crosses_above`, `and`/`or`, ema_N, rsi_N, highest_N…), `stop_atr`/`stop_pct`, `target_r`/`target_pct`, `max_bars`, risk-based sizing, commission. Fills next bar open, stop before target |
 | `report_generate` | Self-contained interactive HTML report in `reports/` — chart with EMAs, S/R, patterns, trades; verdict and reasons; plan; backtest equity curve (light/dark, mobile) |
+| `entry_zones` | **Precise entries.** Every level source merged into confluence zones scored by independent agreement → buy/sell limit inside the best zone, stop beyond it, targets at opposing zones, R:R gate, confirmation trigger |
+| `market_regime` | Trending / ranging / squeeze / transition from ADX/DMI, Choppiness, efficiency ratio, BB-width & ATR percentiles, Supertrend — plus the playbook that fits |
+| `data_volume_profile` | POC, value area high/low (70%), HVN/LVN, price position vs value |
+| `data_fibonacci` | Auto-Fib on the latest significant leg: retracements, golden pocket, extensions, current depth |
+| `data_smart_money` | Unfilled FVGs (with fill %), valid order blocks, liquidity sweeps, untaken equal highs/lows |
+| `data_divergences` | Regular & hidden divergences vs RSI / MACD / OBV / Stoch, with confirmation timing |
+| `backtest_validate` | First-70% vs last-30% consistency, 1000-run Monte Carlo (return/DD percentiles, P(loss)), ±25% sensitivity → verdict |
 | `data_detect_patterns` | 11 candlestick patterns (context-aware) + market structure: HH/HL vs LH/LL, break of structure |
 | `data_compute` | Compute sma/ema/rsi/atr/stdev/vwap/bb/macd from chart bars (no indicator on chart needed) |
 | `data_get_key_levels` | Previous day/bar H/L/C, classic pivots, swing support/resistance zones with touch counts |
@@ -421,7 +438,7 @@ Unit tests cover Pine Script static analysis, the backtester's execution model (
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (102 tools) + CLI (`tv` command, 42 commands)
+- **Transport**: MCP over stdio (109 tools) + CLI (`tv` command, 49 commands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

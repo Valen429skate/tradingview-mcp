@@ -28,6 +28,7 @@ import './commands/stream.js';
 import './commands/analysis.js';
 import './commands/journal.js';
 import './commands/insight.js';
+import './commands/pro.js';
 
 // Run
 import { run } from './router.js';

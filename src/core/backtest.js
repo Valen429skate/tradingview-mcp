@@ -41,6 +41,21 @@ const SERIES = [
   [/^macd_signal$/, (bars) => ta.macd(bars.map(b => b.close)).signal],
   [/^macd_hist$/, (bars) => ta.macd(bars.map(b => b.close)).histogram],
   [/^vwap$/, (bars) => ta.vwap(bars)],
+  [/^supertrend$/, (bars) => ta.supertrend(bars, 10, 3).line],
+  [/^supertrend_dir$/, (bars) => ta.supertrend(bars, 10, 3).dir],
+  [/^adx(?:_(\d+))?$/, (bars, m) => ta.adx(bars, +(m[1] || 14)).adx],
+  [/^plus_di$/, (bars) => ta.adx(bars, 14).plusDI],
+  [/^minus_di$/, (bars) => ta.adx(bars, 14).minusDI],
+  [/^stoch_(k|d)$/, (bars, m) => ta.stochastic(bars)[m[1]]],
+  [/^stochrsi_(k|d)$/, (bars, m) => ta.stochRsi(bars.map(b => b.close))[m[1]]],
+  [/^obv$/, (bars) => ta.obv(bars)],
+  [/^obv_ema(?:_(\d+))?$/, (bars, m) => ta.ema(ta.obv(bars), +(m[1] || 20))],
+  [/^donchian_(upper|lower|middle)$/, (bars, m) => ta.donchian(bars, 20)[m[1]]],
+  [/^keltner_(upper|lower|middle)$/, (bars, m) => ta.keltner(bars, 20, 2)[m[1]]],
+  [/^(tenkan|kijun|senkou_a|senkou_b)$/, (bars, m) => ta.ichimoku(bars)[m[1]]],
+  [/^chop(?:_(\d+))?$/, (bars, m) => ta.choppiness(bars, +(m[1] || 14))],
+  [/^bb_width$/, (bars) => ta.bbWidth(bars.map(b => b.close), 20, 2)],
+  [/^er(?:_(\d+))?$/, (bars, m) => ta.efficiencyRatio(bars.map(b => b.close), +(m[1] || 20))],
 ];
 
 /** Highest/lowest of the PREVIOUS n values (excludes the current bar). */
@@ -117,6 +132,8 @@ export function compileRule(expr, resolve) {
  * @param {number} [o.target_r]       target at n × initial risk (needs a stop)
  * @param {number} [o.target_pct]     target at n %
  * @param {number} [o.max_bars]       time stop
+ * @param {number} [o.trail_atr]      chandelier trailing stop: extreme since entry ∓ ATR × n
+ * @param {number} [o.breakeven_r]    move stop to entry once the trade is +n R
  * @param {number} [o.initial_capital] default 10000
  * @param {number} [o.risk_percent]   size by risk when a stop exists; else all-in
  * @param {number} [o.commission_pct] per side, % of notional (default 0)
@@ -125,10 +142,11 @@ export function runBacktest(bars, o) {
   if (!Array.isArray(bars) || bars.length < 30) throw new Error('Need at least 30 bars to backtest');
   const side = o.side === 'short' ? 'short' : 'long';
   const dir = side === 'long' ? 1 : -1;
-  if (!o.exit && !o.stop_atr && !o.stop_pct && !o.target_r && !o.target_pct && !o.max_bars) {
-    throw new Error('Provide an exit rule and/or stop_atr / stop_pct / target_r / target_pct / max_bars');
+  if (!o.exit && !o.stop_atr && !o.stop_pct && !o.target_r && !o.target_pct && !o.max_bars && !o.trail_atr) {
+    throw new Error('Provide an exit rule and/or stop_atr / stop_pct / trail_atr / target_r / target_pct / max_bars');
   }
   if (o.target_r && !o.stop_atr && !o.stop_pct) throw new Error('target_r needs a stop (stop_atr or stop_pct)');
+  if (o.breakeven_r && !o.stop_atr && !o.stop_pct) throw new Error('breakeven_r needs a stop (stop_atr or stop_pct)');
 
   const resolve = makeSeriesResolver(bars);
   const entryFn = compileRule(o.entry, resolve);
@@ -155,7 +173,7 @@ export function runBacktest(bars, o) {
       pnl: r(pnl, 2), return_pct: r(((price - pos.entry) * dir / pos.entry) * 100, 3),
       r_multiple: pos.risk ? r((price - pos.entry) * dir / pos.risk, 2) : null,
       bars_held: i - pos.index, exit_reason: reason,
-      stop: pos.stop != null ? r(pos.stop, 8) : null, target: pos.target != null ? r(pos.target, 8) : null,
+      stop: pos.initialStop != null ? r(pos.initialStop, 8) : null, target: pos.target != null ? r(pos.target, 8) : null,
     });
     pos = null;
   };
@@ -165,20 +183,21 @@ export function runBacktest(bars, o) {
 
     // 1) Fill orders queued at the previous close, at this bar's open.
     if (pendingExit && pos) { closeTrade(i, b.open, 'exit_signal'); pendingExit = false; }
-    if (pendingEntry && !pos && o.stop_atr && atr[i - 1] == null) pendingEntry = false; // ATR not warmed up: never enter without the requested stop
+    if (pendingEntry && !pos && (o.stop_atr || o.trail_atr) && atr[i - 1] == null) pendingEntry = false; // ATR not warmed up: never enter without the requested stop
     if (pendingEntry && !pos) {
       pendingEntry = false;
       const entry = b.open;
       let stop = null;
       if (o.stop_atr && atr[i - 1] != null) stop = entry - dir * atr[i - 1] * o.stop_atr;
       else if (o.stop_pct) stop = entry * (1 - dir * o.stop_pct / 100);
+      else if (o.trail_atr && atr[i - 1] != null) stop = entry - dir * atr[i - 1] * o.trail_atr;
       const risk = stop != null ? Math.abs(entry - stop) : null;
       let target = null;
       if (o.target_r && risk) target = entry + dir * risk * o.target_r;
       else if (o.target_pct) target = entry * (1 + dir * o.target_pct / 100);
       let qty = equity / entry;                                   // all-in by default
       if (o.risk_percent && risk) qty = Math.min(qty, (equity * o.risk_percent / 100) / risk);
-      if (qty > 0) pos = { entry, stop, target, risk, qty, index: i, time: b.time };
+      if (qty > 0) pos = { entry, stop, initialStop: stop, target, risk, qty, index: i, time: b.time, extreme: dir === 1 ? b.high : b.low, stopReason: 'stop' };
     }
 
     // 2) Intrabar stop / target (stop first when both touched — conservative).
@@ -188,12 +207,26 @@ export function runBacktest(bars, o) {
       const hitTarget = pos.target != null && (dir === 1 ? b.high >= pos.target : b.low <= pos.target);
       if (hitStop) {
         const gapped = dir === 1 ? b.open < pos.stop : b.open > pos.stop;
-        closeTrade(i, gapped ? b.open : pos.stop, 'stop');
+        closeTrade(i, gapped ? b.open : pos.stop, pos.stopReason);
       } else if (hitTarget) {
         const gapped = dir === 1 ? b.open > pos.target : b.open < pos.target;
         closeTrade(i, gapped ? b.open : pos.target, 'target');
       } else if (o.max_bars && i - pos.index + 1 >= o.max_bars) {
         closeTrade(i, b.close, 'time');
+      }
+    }
+
+    // 2b) Trade management at this bar's close — applies from the NEXT bar (no lookahead).
+    if (pos) {
+      pos.extreme = dir === 1 ? Math.max(pos.extreme, b.high) : Math.min(pos.extreme, b.low);
+      const better = (a, c) => (a == null ? c : dir === 1 ? Math.max(a, c) : Math.min(a, c));
+      if (o.breakeven_r && pos.risk && (b.close - pos.entry) * dir >= o.breakeven_r * pos.risk) {
+        const ns = better(pos.stop, pos.entry);
+        if (ns !== pos.stop) { pos.stop = ns; pos.stopReason = 'breakeven'; }
+      }
+      if (o.trail_atr && atr[i] != null) {
+        const ns = better(pos.stop, pos.extreme - dir * atr[i] * o.trail_atr);
+        if (ns !== pos.stop) { pos.stop = ns; pos.stopReason = 'trailing_stop'; }
       }
     }
 
@@ -270,4 +303,116 @@ export async function backtest({ count, max_trades_returned = 20, _deps, ...opts
     equity_curve: downsample(res.curve).map(p => ({ time: p.time, equity: r(p.equity, 2) })),
     notes,
   };
+}
+
+// ── Robustness validation ──────────────────────────────────────────────────
+
+function tradeStats(trades) {
+  if (!trades.length) return { trades: 0 };
+  const wins = trades.filter(t => t.pnl > 0), losses = trades.filter(t => t.pnl < 0);
+  const gp = wins.reduce((s, t) => s + t.pnl, 0), gl = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+  const rs = trades.filter(t => t.r_multiple != null).map(t => t.r_multiple);
+  return {
+    trades: trades.length,
+    win_rate: r((wins.length / trades.length) * 100, 1),
+    profit_factor: gl > 0 ? r(gp / gl, 2) : null,
+    net_pnl: r(gp - gl, 2),
+    avg_r: rs.length ? r(rs.reduce((a, b) => a + b, 0) / rs.length, 2) : null,
+  };
+}
+
+function seededRandom(seed) {
+  let s = seed >>> 0 || 1;
+  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+}
+
+const pct = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(q * (sorted.length - 1))))];
+
+/**
+ * Is the edge real? Three independent checks:
+ *  1. Consistency — stats on the first `split` of the data vs the rest.
+ *  2. Monte Carlo — resample the trade sequence (bootstrap) `simulations`
+ *     times: distribution of final return and max drawdown, risk of loss.
+ *  3. Sensitivity — nudge stop/target/trail ±25%; a real edge survives.
+ */
+export function validateBacktest(bars, opts, { split = 0.7, simulations = 1000, seed = 7 } = {}) {
+  const base = runBacktest(bars, opts);
+  const capital0 = base.stats.initial_capital;
+  const splitIdx = Math.floor(bars.length * split);
+  const splitTime = bars[splitIdx].time;
+  const first = tradeStats(base.trades.filter(t => t.entry_time < splitTime));
+  const second = tradeStats(base.trades.filter(t => t.entry_time >= splitTime));
+
+  // Per-trade return on equity at the time of the trade.
+  let eq = capital0;
+  const rets = base.trades.map(t => { const x = t.pnl / eq; eq += t.pnl; return x; });
+  let mc = null;
+  if (rets.length >= 5) {
+    const rand = seededRandom(seed);
+    const finals = [], dds = [];
+    for (let k = 0; k < simulations; k++) {
+      let e = 1, peak = 1, dd = 0;
+      for (let j = 0; j < rets.length; j++) {
+        e *= 1 + rets[Math.floor(rand() * rets.length)];
+        peak = Math.max(peak, e); dd = Math.max(dd, (peak - e) / peak);
+      }
+      finals.push((e - 1) * 100); dds.push(dd * 100);
+    }
+    finals.sort((a, b) => a - b); dds.sort((a, b) => a - b);
+    mc = {
+      simulations,
+      return_pct: { p5: r(pct(finals, 0.05), 2), median: r(pct(finals, 0.5), 2), p95: r(pct(finals, 0.95), 2) },
+      max_drawdown_pct: { median: r(pct(dds, 0.5), 2), p95: r(pct(dds, 0.95), 2), worst: r(dds.at(-1), 2) },
+      probability_of_loss_pct: r((finals.filter(f => f < 0).length / simulations) * 100, 1),
+    };
+  }
+
+  const sens = [];
+  for (const key of ['stop_atr', 'stop_pct', 'target_r', 'target_pct', 'trail_atr']) {
+    if (!opts[key]) continue;
+    for (const f of [0.75, 1.25]) {
+      try {
+        const v = r(opts[key] * f, 3);
+        const res = runBacktest(bars, { ...opts, [key]: v });
+        sens.push({ param: key, value: v, net_profit_pct: res.stats.net_profit_pct, trades: res.stats.total_trades, profit_factor: res.stats.profit_factor });
+      } catch { /* skip invalid combos */ }
+    }
+  }
+
+  // Verdict
+  const issues = [], positives = [];
+  if (base.stats.total_trades < 20) issues.push(`Only ${base.stats.total_trades} trades — statistically weak.`);
+  if (first.trades && second.trades) {
+    if ((first.net_pnl > 0) !== (second.net_pnl > 0)) issues.push('Profitable in one half, losing in the other — likely curve-fit or regime-dependent.');
+    else if (first.net_pnl > 0) positives.push('Profitable in both the first and last part of the data.');
+  } else issues.push('Not enough trades in both halves to compare.');
+  if (mc) {
+    if (mc.probability_of_loss_pct > 40) issues.push(`Monte Carlo: ${mc.probability_of_loss_pct}% of reshuffled runs lose money.`);
+    else if (mc.probability_of_loss_pct < 15) positives.push(`Monte Carlo: only ${mc.probability_of_loss_pct}% of reshuffled runs lose money.`);
+  }
+  if (sens.length) {
+    const sameSign = sens.every(x => (x.net_profit_pct > 0) === (base.stats.net_profit_pct > 0));
+    if (!sameSign) issues.push('Small parameter changes flip the result — fragile.');
+    else if (base.stats.net_profit_pct > 0) positives.push('Result holds when stop/target are changed ±25%.');
+  }
+  if (!base.stats.beats_buy_hold) issues.push(`Underperforms buy & hold (${base.stats.net_profit_pct}% vs ${base.stats.buy_hold_pct}%).`);
+  let verdict = 'inconclusive';
+  if (base.stats.net_profit_pct <= 0) verdict = 'no_edge';
+  else if (!issues.length) verdict = 'robust';
+  else if (issues.length === 1 && positives.length >= 2) verdict = 'promising';
+  else verdict = 'fragile';
+
+  return {
+    verdict, positives, issues,
+    full_period: { trades: base.stats.total_trades, net_profit_pct: base.stats.net_profit_pct, buy_hold_pct: base.stats.buy_hold_pct, profit_factor: base.stats.profit_factor, max_drawdown_pct: base.stats.max_drawdown_pct, win_rate: base.stats.win_rate },
+    consistency: { split_at: splitTime, first_part: first, last_part: second },
+    monte_carlo: mc || { note: 'Need at least 5 trades for Monte Carlo.' },
+    sensitivity: sens,
+  };
+}
+
+export async function validate({ count, split, simulations, _deps, ...opts } = {}) {
+  const getOhlcv = _deps?.getOhlcv || _getOhlcv;
+  const { bars } = await getOhlcv({ count: Math.min(count || 500, 500) });
+  return { success: true, rules: { entry: opts.entry, exit: opts.exit || null }, bars_tested: bars.length, ...validateBacktest(bars, opts, { split, simulations: Math.min(simulations || 1000, 5000) }), note: 'Validation reduces, but cannot remove, the risk of overfitting. Confirm on other symbols and timeframes.' };
 }

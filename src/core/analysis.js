@@ -52,12 +52,25 @@ const INDICATORS = {
   vwap: (bars) => ta.vwap(bars),
   bb: (bars, p = 20) => ta.bollinger(bars.map(b => b.close), p, 2),
   macd: (bars) => ta.macd(bars.map(b => b.close)),
+  supertrend: (bars, p = 10) => ta.supertrend(bars, p, 3),
+  adx: (bars, p = 14) => ta.adx(bars, p),
+  stoch: (bars, p = 14) => ta.stochastic(bars, p),
+  stochrsi: (bars, p = 14) => ta.stochRsi(bars.map(b => b.close), p, p),
+  obv: (bars) => ta.obv(bars),
+  donchian: (bars, p = 20) => ta.donchian(bars, p),
+  keltner: (bars, p = 20) => ta.keltner(bars, p, 2),
+  ichimoku: (bars) => ta.ichimoku(bars),
+  chop: (bars, p = 14) => ta.choppiness(bars, p),
+  bbwidth: (bars, p = 20) => ta.bbWidth(bars.map(b => b.close), p, 2),
+  er: (bars, p = 20) => ta.efficiencyRatio(bars.map(b => b.close), p),
+  vwapbands: (bars) => ta.vwapBands(bars),
 };
+const ALIASES = { bollinger: 'bb', dmi: 'adx', stochastic: 'stoch', choppiness: 'chop', ichi: 'ichimoku', st: 'supertrend' };
 
 /** Parse "ema:50" → { name: 'ema', period: 50, key: 'ema_50' }. */
 export function parseIndicatorSpec(spec) {
   const [rawName, rawPeriod] = String(spec).trim().toLowerCase().split(/[:(),\s]+/);
-  const name = rawName === 'bollinger' ? 'bb' : rawName;
+  const name = ALIASES[rawName] || rawName;
   if (!INDICATORS[name]) throw new Error(`Unknown indicator "${spec}". Supported: ${Object.keys(INDICATORS).join(', ')} (period with ":", e.g. "ema:50")`);
   const period = rawPeriod ? Number(rawPeriod) : undefined;
   if (period !== undefined && (!Number.isInteger(period) || period < 1 || period > MAX_BARS)) throw new Error(`Invalid period in "${spec}"`);

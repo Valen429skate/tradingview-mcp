@@ -15,6 +15,9 @@ import { computeKeyLevels } from './analysis.js';
 import { detectCandles, marketStructure } from './patterns.js';
 import { scoreConfluence, buildPlan } from './insight.js';
 import { runBacktest } from './backtest.js';
+import { buildZones, planFromZones } from './zones.js';
+import { regime as detectRegime, divergences } from './signals.js';
+import { liquiditySweeps } from './smc.js';
 import { sanitizeFilename } from './export.js';
 import { getOhlcv as _getOhlcv } from './data.js';
 import { getState as _getState } from './chart.js';
@@ -34,7 +37,7 @@ const VERDICT_LABEL = {
 
 // ── SVG builders ───────────────────────────────────────────────────────────
 
-function priceChart({ bars, ema20, ema50, support, resistance, patterns, trades }) {
+function priceChart({ bars, ema20, ema50, support, resistance, patterns, trades, zones = [] }) {
   const W = 960, H = 420, padL = 8, padR = 72, padT = 14, padB = 26;
   const n = bars.length;
   const levelPrices = [...support, ...resistance].map(z => z.price);
@@ -67,6 +70,17 @@ function priceChart({ bars, ema20, ema50, support, resistance, patterns, trades 
   for (let k = 0; k < 5; k++) {
     const i = Math.round((k * (n - 1)) / 4);
     out.push(`<text class="tick" text-anchor="${k === 0 ? 'start' : k === 4 ? 'end' : 'middle'}" x="${x(i)}" y="${H - 8}">${dateStr(bars[i].time).slice(0, 10)}</text>`);
+  }
+  // Confluence zones — translucent bands behind everything, labelled with score
+  const labelYs = [];
+  for (const z of zones) {
+    if (z.high < lo || z.low > hi) continue;
+    const yt = y(Math.min(hi, z.high)), yb = y(Math.max(lo, z.low));
+    out.push(`<rect class="zone" x="${padL}" y="${yt}" width="${W - padL - padR}" height="${Math.max(2, yb - yt)}"><title>${esc(z.role || 'Zone')} ${fmt(z.low, dp)}–${fmt(z.high, dp)} · score ${z.score} · ${esc(z.sources.join(', '))}</title></rect>`);
+    let ly = yt + 12;
+    while (labelYs.some(v => Math.abs(v - ly) < 14)) ly += 14;   // never stack labels on top of each other
+    labelYs.push(ly);
+    out.push(`<text class="zone-label" x="${padL + 4}" y="${ly}">${esc(z.role || 'Zone')} ★${z.score} · ${z.confluences} confluences</text>`);
   }
   // Support / resistance — hairline dashed, labelled (identity by text, not color)
   for (const [zones, tag] of [[support, 'S'], [resistance, 'R']]) {
@@ -160,6 +174,7 @@ svg{width:100%;height:auto;display:block}
 .up rect{fill:var(--up)}.down rect{fill:var(--down)}.up .wick{stroke:var(--up)}.down .wick{stroke:var(--down)}.wick{stroke-width:1}
 .ema20{fill:none;stroke:var(--ink2);stroke-width:2}.ema50{fill:none;stroke:var(--ink2);stroke-width:2;stroke-dasharray:6 4}
 .ema-label{fill:var(--ink2);font-size:11px;font-weight:600}
+.zone{fill:var(--ink);opacity:.06}.zone-label{fill:var(--ink2);font-size:11px;font-weight:600;paint-order:stroke;stroke:var(--surface);stroke-width:3px}
 .level{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 4}.level-label{fill:var(--muted);font-size:11px;paint-order:stroke;stroke:var(--surface);stroke-width:3px}
 .pattern{fill:var(--ink);font-size:11px}
 .trade-link{stroke-width:1.5;stroke-dasharray:3 2}.trade-link.win{stroke:var(--good)}.trade-link.loss{stroke:var(--bad)}
@@ -181,6 +196,32 @@ th{color:var(--ink2);font-weight:500;border-top:0}th:first-child,td:first-child{
 .plan dl{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;margin:0}.plan dt{color:var(--ink2)}.plan dd{margin:0;font-variant-numeric:tabular-nums}
 footer{color:var(--muted);font-size:12px;margin-top:24px}
 `;
+
+/** Shade what the plan uses: the entry zone and up to two target zones; else the 3 strongest nearby. */
+function zonesToDraw(a) {
+  const zs = a.zones || [];
+  const p = a.precise;
+  if (p?.entry_zone) {
+    const entry = zs.find(z => z.low === p.entry_zone.low && z.high === p.entry_zone.high);
+    const targets = (p.targets || []).map(t => zs.find(z => z.low === t.price || z.high === t.price)).filter(Boolean).slice(0, 2);
+    return [entry && { ...entry, role: 'Entry zone' }, ...targets.map((z, i) => ({ ...z, role: `Target ${i + 1} zone` }))].filter(Boolean);
+  }
+  return zs.filter(z => Math.abs(z.distance_atr) <= 3).slice(0, 3);
+}
+
+function preciseHtml(p, dp) {
+  if (!p || p.action === 'no_setup' || p.entry == null) return p?.reason ? `<section class="card plan"><h2>Precise entry</h2><p>${esc(p.reason)}</p></section>` : '';
+  const label = { buy_limit: '▲ Buy limit', sell_limit: '▼ Sell limit', skip_poor_rr: '◆ Skip — reward/risk too low' }[p.action] || p.action;
+  return `<section class="card plan"><h2>Precise entry — confluence zone</h2><dl>
+    <dt>Action</dt><dd>${label}</dd>
+    <dt>Entry</dt><dd>${fmt(p.entry, dp)} <span class="sub">(zone ${fmt(p.entry_zone.low, dp)}–${fmt(p.entry_zone.high, dp)}, ★${p.entry_zone.score})</span></dd>
+    <dt>Why here</dt><dd>${esc(p.entry_zone.sources.join(' + '))}</dd>
+    <dt>Stop</dt><dd>${fmt(p.stop, dp)} <span class="sub">(${esc(p.stop_reason)})</span></dd>
+    ${p.targets.map((t, i) => `<dt>Target ${i + 1}</dt><dd>${fmt(t.price, dp)} <span class="sub">(${t.r_multiple}R · ${esc(t.why)})</span></dd>`).join('')}
+    <dt>Trigger</dt><dd>${esc(p.trigger)}</dd>
+    ${p.warning ? `<dt>Warning</dt><dd class="neg">${esc(p.warning)}</dd>` : ''}
+  </dl></section>`;
+}
 
 const JS = `
 (function(){
@@ -222,7 +263,7 @@ export function buildReportHtml({ symbol, timeframe, bars, analysis, levels, pat
   const startT = shown[0].time;
   const trades = (backtest?.trades || []).filter(t => t.entry_time >= startT);
   const pats = (patterns || []).filter(p => p.time >= startT && p.bias !== 'neutral');
-  const { svg } = priceChart({ bars: shown, ema20, ema50, support: levels.support.slice(0, 4), resistance: levels.resistance.slice(0, 4), patterns: pats, trades });
+  const { svg } = priceChart({ bars: shown, ema20, ema50, support: levels.support.slice(0, 4), resistance: levels.resistance.slice(0, 4), patterns: pats, trades, zones: zonesToDraw(analysis) });
   const dp = pdp(shown.at(-1).close);
   const last = shown.at(-1), prev = shown.at(-2) || last;
   const chg = ((last.close - prev.close) / prev.close) * 100;
@@ -269,6 +310,7 @@ export function buildReportHtml({ symbol, timeframe, bars, analysis, levels, pat
   <div class="tile verdict"><div class="k">Confluence verdict</div><div class="v">${vIcon} ${esc(vLabel)}</div><div class="meter" role="img" aria-label="Score ${analysis.score} of -100 to 100"><span class="mid"></span><i style="left:calc(${scorePos}% - 1.5px)"></i></div><div class="sub">Score ${analysis.score > 0 ? '+' : ''}${analysis.score} / 100</div></div>
   <div class="tile"><div class="k">Trend (EMA stack)</div><div class="v">${esc(String(analysis.snapshot.trend).replace('_', ' '))}</div><div class="sub">Structure: ${esc(analysis.structure.structure)}</div></div>
   <div class="tile"><div class="k">RSI 14</div><div class="v">${fmt(analysis.snapshot.rsi, 1)}</div></div>
+  ${analysis.regime ? `<div class="tile"><div class="k">Market regime</div><div class="v" style="font-size:17px">${esc(analysis.regime.state.replace('_', ' '))}</div><div class="sub">ADX ${fmt(analysis.regime.adx, 1)} · ${esc(analysis.regime.trend_strength.replace('_', ' '))}</div></div>` : ''}
   <div class="tile"><div class="k">ATR 14</div><div class="v">${fmt(analysis.snapshot.atr, dp)}</div><div class="sub">${fmt(analysis.snapshot.atr_pct)}% of price</div></div>
   <div class="tile"><div class="k">Support · Resistance</div><div class="v" style="font-size:17px">${fmt(levels.nearest_support, dp)} · ${fmt(levels.nearest_resistance, dp)}</div></div>
 </div>
@@ -283,6 +325,8 @@ export function buildReportHtml({ symbol, timeframe, bars, analysis, levels, pat
   <section class="card"><h2>Why — bearish factors</h2>${factorList(analysis.bearish_factors)}</section>
 </div>
 <section class="card plan"><h2>Suggested plan</h2>${planHtml}</section>
+${analysis.precise ? preciseHtml(analysis.precise, dp) : ''}
+${analysis.regime ? `<section class="card"><h2>Regime playbook</h2><p>${esc(analysis.regime.playbook)}</p></section>` : ''}
 ${btHtml}
 <footer>Generated ${esc(generated_at)} by tradingview-mcp · Rule-based technical analysis, not financial advice. Backtests fill at next-bar open and are in-sample.</footer>
 </main>
@@ -306,9 +350,14 @@ export async function generateReport({ count, backtest: btOpts, account_size, ri
   const levels = computeKeyLevels(bars);
   const structure = marketStructure(bars);
   const patterns = detectCandles(bars, { lookback: 150 });
-  const conf = scoreConfluence({ snap, structure, patterns: patterns.filter(p => p.bars_ago <= 10), levels });
+  const rgEarly = detectRegime(bars);
+  const extras = { regime: rgEarly, divs: [...divergences(bars, { oscillator: 'rsi', recent: 15 }), ...divergences(bars, { oscillator: 'macd', recent: 15 })], sweeps: liquiditySweeps(bars, { lookback: 10 }) };
+  const conf = scoreConfluence({ snap, structure, patterns: patterns.filter(p => p.bars_ago <= 10), levels, extras });
   const plan = buildPlan({ verdict: conf.verdict, snap, levels }, { account_size, risk_percent, point_value });
-  const analysis = { ...conf, plan, snapshot: snap, structure };
+  const zones = buildZones(bars);
+  const rg = rgEarly;
+  const precise = plan.action === 'wait' ? null : planFromZones(bars, zones, { side: plan.action === 'look_for_long' ? 'long' : 'short' });
+  const analysis = { ...conf, plan, snapshot: snap, structure, zones, regime: rg, precise };
 
   let backtest = null;
   if (btOpts) {

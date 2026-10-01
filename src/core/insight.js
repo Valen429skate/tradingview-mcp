@@ -10,6 +10,9 @@ import { computeKeyLevels, multiTimeframe as _multiTimeframe } from './analysis.
 import { detectCandles, marketStructure } from './patterns.js';
 import { calcPositionSize } from './risk.js';
 import { getOhlcv as _getOhlcv } from './data.js';
+import { regime as detectRegime, divergences } from './signals.js';
+import { liquiditySweeps } from './smc.js';
+import { buildZones, planFromZones } from './zones.js';
 
 const TREND_PTS = { strong_up: 25, up: 15, neutral: 0, down: -15, strong_down: -25, insufficient_data: 0 };
 // Human-friendly number for reason strings (prices, indicator values).
@@ -17,7 +20,7 @@ const n = (v) => (v == null ? '—' : Math.abs(v) >= 1 ? ta.round(v, 2) : ta.rou
 
 const MTF_PTS = { bullish_aligned: 20, leaning_bullish: 10, mixed: 0, leaning_bearish: -10, bearish_aligned: -20 };
 
-export function scoreConfluence({ snap, structure, patterns, levels, mtf }) {
+export function scoreConfluence({ snap, structure, patterns, levels, mtf, extras }) {
   const f = [];
   const add = (points, reason) => { if (points) f.push({ points, reason }); };
 
@@ -46,6 +49,18 @@ export function scoreConfluence({ snap, structure, patterns, levels, mtf }) {
   if (snap.rel_volume != null && snap.rel_volume >= 1.8) add(Math.sign(snap.change_pct || 0) * 5, `Volume ${n(snap.rel_volume)}× average on a ${snap.change_pct > 0 ? 'up' : 'down'} bar`);
 
   if (mtf?.alignment) add(MTF_PTS[mtf.alignment.bias] ?? 0, `Higher timeframes: ${mtf.alignment.bias.replace('_', ' ')} (${mtf.alignment.up_count} up / ${mtf.alignment.down_count} down)`);
+
+  // Professional signals (optional — present when analyzeChart computes them).
+  if (extras) {
+    const { regime: rg, divs, sweeps } = extras;
+    if (rg?.supertrend) add(rg.supertrend.direction === 'up' ? 6 : -6, `Supertrend ${rg.supertrend.direction} (flip level ${n(rg.supertrend.level)})`);
+    if (rg?.adx != null && rg.adx >= 25) add(rg.plus_di > rg.minus_di ? 6 : -6, `ADX ${n(rg.adx)} — strong trend, ${rg.plus_di > rg.minus_di ? '+DI' : '−DI'} in control`);
+    for (const d of (divs || []).filter(x => x.confirmed_bars_ago <= 8).slice(0, 2)) {
+      add(d.bias === 'bullish' ? (d.type.startsWith('regular') ? 8 : 5) : (d.type.startsWith('regular') ? -8 : -5), `${d.type.replace('_', ' ')} ${d.oscillator.toUpperCase()} divergence (price ${n(d.price_from)}→${n(d.price_to)})`);
+    }
+    const sw = (sweeps || []).find(x => x.bars_ago <= 5);
+    if (sw) add(sw.type === 'bullish' ? 8 : -8, `Liquidity sweep: ${sw.type === 'bullish' ? 'lows' : 'highs'} at ${n(sw.swept_level)} taken and rejected ${sw.bars_ago} bars ago`);
+  }
 
   const score = Math.max(-100, Math.min(100, f.reduce((s, x) => s + x.points, 0)));
   let verdict = 'neutral';
@@ -115,8 +130,30 @@ export async function analyzeChart({ count, include_mtf = false, timeframes, acc
   let mtf = null;
   if (include_mtf) { try { mtf = await multiTimeframe({ timeframes }); } catch (err) { mtf = { error: err.message }; } }
 
-  const conf = scoreConfluence({ snap, structure, patterns, levels, mtf: mtf?.alignment ? mtf : null });
+  const rg = detectRegime(bars);
+  const divs = [...divergences(bars, { oscillator: 'rsi', recent: 15 }), ...divergences(bars, { oscillator: 'macd', recent: 15 })];
+  const sweeps = liquiditySweeps(bars, { lookback: 10 });
+  const conf = scoreConfluence({ snap, structure, patterns, levels, mtf: mtf?.alignment ? mtf : null, extras: { regime: rg, divs, sweeps } });
   const plan = buildPlan({ verdict: conf.verdict, snap, levels }, { account_size, risk_percent, point_value, qty_step });
+
+  // Precise limit-order plan from confluence zones, in the verdict's direction.
+  let precise = null;
+  if (plan.action !== 'wait') {
+    try {
+      const zones = buildZones(bars);
+      precise = planFromZones(bars, zones, { side: plan.action === 'look_for_long' ? 'long' : 'short' });
+      if (account_size && precise.entry != null) {
+        const sized = calcPositionSize({ account_size, risk_percent, point_value, qty_step, entry: precise.entry, stop: precise.stop, targets: precise.targets.map(t => t.price) });
+        precise.position = { quantity: sized.quantity, actual_risk: sized.actual_risk, actual_risk_pct: sized.actual_risk_pct, ...(sized.warnings && { warnings: sized.warnings }) };
+      }
+    } catch (err) { precise = { error: err.message }; }
+  }
+  // Counter-regime warning: trend verdict inside a range, or a fade inside a strong trend.
+  const regimeNote = rg.state === 'ranging' && /strong/.test(conf.verdict)
+    ? 'Market is ranging — trend signals are less reliable; prefer limit entries at range extremes.'
+    : rg.state.startsWith('trending') && ((rg.state.endsWith('up') && conf.verdict.includes('bear')) || (rg.state.endsWith('down') && conf.verdict.includes('bull')))
+      ? 'Verdict is AGAINST the prevailing trend — counter-trend trade: smaller size, quicker targets.'
+      : null;
 
   return {
     success: true,
@@ -126,6 +163,10 @@ export async function analyzeChart({ count, include_mtf = false, timeframes, acc
     bullish_factors: conf.bullish_factors,
     bearish_factors: conf.bearish_factors,
     plan,
+    ...(precise && { precise_entry: precise }),
+    regime: { state: rg.state, trend_strength: rg.trend_strength, adx: rg.adx, choppiness: rg.choppiness, supertrend: rg.supertrend, playbook: rg.playbook, ...(regimeNote && { warning: regimeNote }) },
+    divergences: divs.filter(d => d.bars_ago <= 15).slice(0, 4),
+    ...(sweeps.length && { liquidity_sweeps: sweeps.slice(0, 3) }),
     snapshot: { close: snap.close, change_pct: snap.change_pct, rsi: snap.rsi, atr: snap.atr, atr_pct: snap.atr_pct, trend: snap.trend, ema20: snap.ema20, ema50: snap.ema50, ema200: snap.ema200, rel_volume: snap.rel_volume },
     structure: { structure: structure.structure, break_of_structure: structure.break_of_structure, last_swing_high: structure.last_swing_high, last_swing_low: structure.last_swing_low },
     levels: { nearest_support: levels.nearest_support, nearest_resistance: levels.nearest_resistance, pivots: levels.pivots, previous_period: levels.previous_period },

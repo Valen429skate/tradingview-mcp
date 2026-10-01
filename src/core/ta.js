@@ -245,6 +245,14 @@ export function snapshot(bars) {
     high_20: Math.max(...lookback.map(b => b.high)),
     low_20: Math.min(...lookback.map(b => b.low)),
   };
+  if (bars.length >= 30) {
+    const d = adx(bars, 14);
+    snap.adx = last(d.adx); snap.plus_di = last(d.plusDI); snap.minus_di = last(d.minusDI);
+    snap.supertrend_dir = last(supertrend(bars, 10, 3).dir);
+    const st = stochRsi(closes); snap.stochrsi_k = last(st.k);
+    snap.chop = last(choppiness(bars, 14));
+    snap.bb_width = last(bbWidth(closes, 20, 2));
+  }
   snap.trend = trendLabel(snap);
   for (const k of Object.keys(snap)) if (typeof snap[k] === 'number') snap[k] = round(snap[k], 6);
   return snap;
@@ -297,4 +305,188 @@ export function evaluateConditions(conds, snap) {
     return { condition: c.text, left: round(l, 6), right: round(r, 6), pass };
   });
   return { pass: details.every(d => d.pass), details };
+}
+
+// ── Professional indicators ────────────────────────────────────────────────
+
+/** Wilder's moving average (RMA) — the smoothing behind RSI/ATR/ADX. */
+export function rma(values, period) {
+  const out = new Array(values.length).fill(null);
+  let start = values.findIndex(v => v != null);
+  if (start < 0 || values.length - start < period) return out;
+  let prev = 0;
+  for (let i = start; i < start + period; i++) prev += values[i];
+  prev /= period;
+  out[start + period - 1] = prev;
+  for (let i = start + period; i < values.length; i++) {
+    prev = (prev * (period - 1) + values[i]) / period;
+    out[i] = prev;
+  }
+  return out;
+}
+
+/** ADX / DMI (Wilder). adx > 25 = trending, < 20 = ranging. */
+export function adx(bars, period = 14) {
+  const n = bars.length;
+  const plusDM = new Array(n).fill(0), minusDM = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const up = bars[i].high - bars[i - 1].high;
+    const down = bars[i - 1].low - bars[i].low;
+    plusDM[i] = up > down && up > 0 ? up : 0;
+    minusDM[i] = down > up && down > 0 ? down : 0;
+  }
+  const tr = trueRange(bars);
+  const trS = rma(tr.slice(1), period), pS = rma(plusDM.slice(1), period), mS = rma(minusDM.slice(1), period);
+  const plusDI = [null], minusDI = [null], dx = [null];
+  for (let i = 0; i < n - 1; i++) {
+    if (trS[i] == null || trS[i] === 0) { plusDI.push(null); minusDI.push(null); dx.push(null); continue; }
+    const p = (100 * pS[i]) / trS[i], m = (100 * mS[i]) / trS[i];
+    plusDI.push(p); minusDI.push(m);
+    dx.push(p + m === 0 ? 0 : (100 * Math.abs(p - m)) / (p + m));
+  }
+  return { adx: rma(dx, period), plusDI, minusDI };
+}
+
+/** Supertrend (ATR bands that flip with the trend). dir: 1 = up, -1 = down. */
+export function supertrend(bars, period = 10, mult = 3) {
+  const a = atr(bars, period);
+  const line = new Array(bars.length).fill(null), dir = new Array(bars.length).fill(null);
+  let fu = null, fl = null, d = 1;
+  for (let i = 0; i < bars.length; i++) {
+    if (a[i] == null) continue;
+    const hl2 = (bars[i].high + bars[i].low) / 2;
+    const bu = hl2 + mult * a[i], bl = hl2 - mult * a[i];
+    const pc = i > 0 ? bars[i - 1].close : bars[i].close;
+    fu = fu == null || bu < fu || pc > fu ? bu : fu;
+    fl = fl == null || bl > fl || pc < fl ? bl : fl;
+    if (d === 1 && bars[i].close < fl) d = -1;
+    else if (d === -1 && bars[i].close > fu) d = 1;
+    dir[i] = d;
+    line[i] = d === 1 ? fl : fu;
+  }
+  return { line, dir };
+}
+
+export function highest(values, period) {
+  return values.map((_, i) => (i < period - 1 ? null : Math.max(...values.slice(i - period + 1, i + 1))));
+}
+export function lowest(values, period) {
+  return values.map((_, i) => (i < period - 1 ? null : Math.min(...values.slice(i - period + 1, i + 1))));
+}
+
+/** Slow stochastic %K / %D. */
+export function stochastic(bars, kLen = 14, kSmooth = 3, dLen = 3) {
+  const hh = highest(bars.map(b => b.high), kLen), ll = lowest(bars.map(b => b.low), kLen);
+  const raw = bars.map((b, i) => (hh[i] == null ? null : hh[i] === ll[i] ? 50 : (100 * (b.close - ll[i])) / (hh[i] - ll[i])));
+  const k = smaNullable(raw, kSmooth);
+  return { k, d: smaNullable(k, dLen) };
+}
+
+/** Stochastic RSI (TradingView defaults 3,3,14,14). */
+export function stochRsi(values, rsiLen = 14, stochLen = 14, kLen = 3, dLen = 3) {
+  const r = rsi(values, rsiLen);
+  const raw = r.map((v, i) => {
+    if (v == null || i < rsiLen + stochLen - 1) return null;
+    const win = r.slice(i - stochLen + 1, i + 1);
+    const hi = Math.max(...win), lo = Math.min(...win);
+    return hi === lo ? 50 : (100 * (v - lo)) / (hi - lo);
+  });
+  const k = smaNullable(raw, kLen);
+  return { k, d: smaNullable(k, dLen) };
+}
+
+/** SMA over a series that starts with nulls. */
+export function smaNullable(values, period) {
+  const out = new Array(values.length).fill(null);
+  for (let i = period - 1; i < values.length; i++) {
+    const win = values.slice(i - period + 1, i + 1);
+    if (win.some(v => v == null)) continue;
+    out[i] = win.reduce((a, b) => a + b, 0) / period;
+  }
+  return out;
+}
+
+export function obv(bars) {
+  let v = 0;
+  return bars.map((b, i) => {
+    if (i > 0) v += b.close > bars[i - 1].close ? (b.volume || 0) : b.close < bars[i - 1].close ? -(b.volume || 0) : 0;
+    return v;
+  });
+}
+
+export function donchian(bars, period = 20) {
+  const upper = highest(bars.map(b => b.high), period), lower = lowest(bars.map(b => b.low), period);
+  return { upper, lower, middle: upper.map((u, i) => (u == null ? null : (u + lower[i]) / 2)) };
+}
+
+export function keltner(bars, period = 20, mult = 2) {
+  const mid = ema(bars.map(b => b.close), period), a = atr(bars, period);
+  return { middle: mid, upper: mid.map((m, i) => (m == null || a[i] == null ? null : m + mult * a[i])), lower: mid.map((m, i) => (m == null || a[i] == null ? null : m - mult * a[i])) };
+}
+
+/**
+ * Ichimoku, aligned to the CURRENT bar: senkou_a/b are the cloud values
+ * plotted under today's bar (computed `displacement` bars ago).
+ */
+export function ichimoku(bars, conv = 9, base = 26, spanB = 52, displacement = 26) {
+  const mid = (p) => { const h = highest(bars.map(b => b.high), p), l = lowest(bars.map(b => b.low), p); return h.map((v, i) => (v == null ? null : (v + l[i]) / 2)); };
+  const tenkan = mid(conv), kijun = mid(base), sb = mid(spanB);
+  const sa = tenkan.map((t, i) => (t == null || kijun[i] == null ? null : (t + kijun[i]) / 2));
+  const shift = (s) => s.map((_, i) => (i - displacement + 1 >= 0 ? s[i - displacement + 1] : null));
+  return { tenkan, kijun, senkou_a: shift(sa), senkou_b: shift(sb) };
+}
+
+/** Choppiness Index: > 61.8 choppy/ranging, < 38.2 trending. */
+export function choppiness(bars, period = 14) {
+  const tr = trueRange(bars);
+  return bars.map((_, i) => {
+    if (i < period) return null;
+    const win = bars.slice(i - period + 1, i + 1);
+    const hh = Math.max(...win.map(b => b.high)), ll = Math.min(...win.map(b => b.low));
+    const sumTr = tr.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
+    return hh === ll ? null : (100 * Math.log10(sumTr / (hh - ll))) / Math.log10(period);
+  });
+}
+
+/** Bollinger Band width as % of the middle band (volatility squeeze gauge). */
+export function bbWidth(values, period = 20, mult = 2) {
+  const b = bollinger(values, period, mult);
+  return b.middle.map((m, i) => (m == null || m === 0 ? null : ((b.upper[i] - b.lower[i]) / m) * 100));
+}
+
+/** Kaufman efficiency ratio: 1 = straight line, 0 = pure noise. */
+export function efficiencyRatio(values, period = 20) {
+  return values.map((v, i) => {
+    if (i < period) return null;
+    let path = 0;
+    for (let j = i - period + 1; j <= i; j++) path += Math.abs(values[j] - values[j - 1]);
+    return path === 0 ? 0 : Math.abs(v - values[i - period]) / path;
+  });
+}
+
+/** VWAP with ±stdev bands, anchored at bars[0]. */
+export function vwapBands(bars, mults = [1, 2]) {
+  let pv = 0, vol = 0, pv2 = 0;
+  const vw = [], sd = [];
+  for (const b of bars) {
+    const tp = (b.high + b.low + b.close) / 3, v = b.volume || 0;
+    pv += tp * v; vol += v; pv2 += tp * tp * v;
+    const m = vol > 0 ? pv / vol : null;
+    vw.push(m);
+    sd.push(m == null ? null : Math.sqrt(Math.max(0, pv2 / vol - m * m)));
+  }
+  const out = { vwap: vw };
+  for (const k of mults) {
+    out[`upper_${k}`] = vw.map((m, i) => (m == null ? null : m + k * sd[i]));
+    out[`lower_${k}`] = vw.map((m, i) => (m == null ? null : m - k * sd[i]));
+  }
+  return out;
+}
+
+/** Percentile rank (0-100) of the last value within the last `period` values. */
+export function percentRank(values, period = 100) {
+  const win = values.slice(-period).filter(v => v != null);
+  if (win.length < 2) return null;
+  const lastV = win[win.length - 1];
+  return (win.filter(v => v < lastV).length / (win.length - 1)) * 100;
 }

@@ -181,7 +181,7 @@ describe('analysis.compute()', () => {
   });
 
   it('rejects unknown indicators and bad periods', () => {
-    assert.throws(() => analysis.parseIndicatorSpec('ichimoku'), /Unknown indicator/);
+    assert.throws(() => analysis.parseIndicatorSpec('foobar'), /Unknown indicator/);
     assert.throws(() => analysis.parseIndicatorSpec('ema:-1'), /Invalid period/);
     assert.deepEqual(analysis.parseIndicatorSpec('EMA:200'), { name: 'ema', period: 200, key: 'ema_200' });
   });

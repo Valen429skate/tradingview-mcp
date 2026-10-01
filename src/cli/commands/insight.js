@@ -38,12 +38,15 @@ register('backtest', {
     'target-r': { type: 'string', description: 'Target = n R' },
     'target-pct': { type: 'string', description: 'Target = n %' },
     'max-bars': { type: 'string', description: 'Time stop' },
+    'trail-atr': { type: 'string', description: 'Trailing stop ATR × n' },
+    'breakeven-r': { type: 'string', description: 'Breakeven at +n R' },
     risk: { type: 'string', short: 'r', description: 'Risk % per trade' },
     commission: { type: 'string', description: 'Commission % per side' },
   },
   handler: (o) => bt.backtest({
     entry: o.entry, exit: o.exit, side: o.side, stop_atr: num(o['stop-atr']), stop_pct: num(o['stop-pct']),
     target_r: num(o['target-r']), target_pct: num(o['target-pct']), max_bars: num(o['max-bars']),
+    trail_atr: num(o['trail-atr']), breakeven_r: num(o['breakeven-r']),
     risk_percent: num(o.risk), commission_pct: num(o.commission),
   }),
 });
