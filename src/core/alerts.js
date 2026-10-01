@@ -7,6 +7,8 @@
  * the endpoint rejects. The create/delete bodies must be wrapped in a `payload` object.
  */
 import { evaluate, evaluateAsync, safeString, requireFinite } from '../connection.js';
+import { getPineLines as _getPineLines, getOhlcv as _getOhlcv } from './data.js';
+import { keyLevels as _keyLevels } from './analysis.js';
 
 // Map the tool's friendly condition names to TradingView's alert condition types.
 const CONDITION_TYPE_MAP = {
@@ -125,4 +127,75 @@ export async function deleteAlerts({ delete_all, alert_ids, alert_id } = {}) {
     return { success: true, source: 'internal_api', deleted_count: ids.length, alert_ids: ids };
   }
   return { success: false, source: 'internal_api', alert_ids: ids, error: (result && (result.error || result.response)) || 'delete failed' };
+}
+
+/**
+ * Pick which levels to alert on: the `max_alerts` closest to `price`, within
+ * `max_distance_pct`, skipping duplicates within `min_gap_pct` of each other.
+ * Pure — exported for tests.
+ */
+export function selectLevels(levels, price, { max_alerts = 5, max_distance_pct = 5, min_gap_pct = 0.05 } = {}) {
+  const uniq = [...new Set(levels.filter(Number.isFinite))]
+    .map(l => ({ price: l, distance_pct: ((l - price) / price) * 100 }))
+    .filter(l => Math.abs(l.distance_pct) <= max_distance_pct && l.price !== price)
+    .sort((a, b) => Math.abs(a.distance_pct) - Math.abs(b.distance_pct));
+  const picked = [];
+  for (const l of uniq) {
+    if (picked.some(p => Math.abs(p.price - l.price) / price * 100 < min_gap_pct)) continue;
+    picked.push(l);
+    if (picked.length >= max_alerts) break;
+  }
+  return picked;
+}
+
+/**
+ * Create price alerts on levels from Pine indicators (line.new levels) and/or
+ * computed key levels (support/resistance/pivots). dry_run previews without
+ * creating anything.
+ */
+export async function createFromLevels({ source = 'pine', study_filter, max_alerts = 5, max_distance_pct = 5, dry_run = false, message_prefix, _deps } = {}) {
+  const getPineLines = _deps?.getPineLines || _getPineLines;
+  const getOhlcv = _deps?.getOhlcv || _getOhlcv;
+  const keyLevels = _deps?.keyLevels || _keyLevels;
+  const createAlert = _deps?.create || create;
+
+  const cap = Math.min(Number(max_alerts) || 5, 20);
+  const { bars } = await getOhlcv({ count: 5 });
+  const price = bars[bars.length - 1].close;
+  const levels = [];
+  const origin = new Map();
+
+  if (source === 'pine' || source === 'both') {
+    const pine = await getPineLines({ study_filter });
+    for (const s of pine.studies || []) for (const l of s.horizontal_levels || []) { levels.push(l); if (!origin.has(l)) origin.set(l, s.name); }
+  }
+  if (source === 'key_levels' || source === 'both') {
+    const kl = await keyLevels({});
+    for (const z of [...(kl.support || []), ...(kl.resistance || [])]) { levels.push(z.price); if (!origin.has(z.price)) origin.set(z.price, `S/R (${z.touches} touches)`); }
+    for (const [k, v] of Object.entries(kl.pivots || {})) { levels.push(v); if (!origin.has(v)) origin.set(v, `Pivot ${k.toUpperCase()}`); }
+    if (kl.previous_period) for (const k of ['high', 'low']) { const v = kl.previous_period[k]; levels.push(v); if (!origin.has(v)) origin.set(v, `Prev ${k}`); }
+  }
+  if (!['pine', 'key_levels', 'both'].includes(source)) throw new Error('source must be pine, key_levels or both');
+  if (!levels.length) {
+    return { success: false, error: source === 'pine' ? 'No Pine line levels found. Make sure the indicator is visible, or use source: "key_levels".' : 'No levels found.' };
+  }
+
+  const picked = selectLevels(levels, price, { max_alerts: cap, max_distance_pct: Number(max_distance_pct) || 5 });
+  const plan = picked.map(l => ({
+    price: l.price,
+    distance_pct: Math.round(l.distance_pct * 100) / 100,
+    origin: origin.get(l.price) || null,
+    direction: l.price > price ? 'above' : 'below',
+  }));
+  if (dry_run) return { success: true, dry_run: true, current_price: price, candidates: levels.length, planned: plan };
+
+  const created = [];
+  for (const p of plan) {
+    const msg = `${message_prefix ? message_prefix + ' ' : ''}${p.origin ? p.origin + ' ' : ''}level ${p.price} reached`;
+    try {
+      const res = await createAlert({ condition: 'crossing', price: p.price, message: msg });
+      created.push({ ...p, success: !!res?.success, alert_id: res?.alert_id ?? null, ...(res?.error && { error: res.error }) });
+    } catch (err) { created.push({ ...p, success: false, error: err.message }); }
+  }
+  return { success: created.some(c => c.success), current_price: price, created_count: created.filter(c => c.success).length, alerts: created };
 }

@@ -14,6 +14,8 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import { registerAnalysisTools } from './tools/analysis.js';
+import { registerJournalTools } from './tools/journal.js';
 
 const server = new McpServer(
   {
@@ -22,7 +24,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 84 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 98 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -60,6 +62,20 @@ Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
 Tabs: tab_list, tab_new, tab_close, tab_switch
 
+Analysis (computed locally from chart bars — no indicator needed on chart):
+- data_compute → RSI/ATR/EMA/SMA/BB/MACD/VWAP values
+- data_get_key_levels → auto support/resistance, pivots, previous day H/L/C
+- chart_multi_timeframe → trend/RSI/ATR across W, D, 4H, 1H + alignment bias
+- data_correlation → correlation matrix between symbols
+- batch_scan → screener: "rsi < 30 and close > ema200" over symbols or watchlist
+Risk & trading:
+- risk_position_size → quantity, risk, R targets; draw=true plots entry/stop/TPs
+- alert_from_levels → alerts on the nearest Pine/key levels (dry_run=true to preview)
+- journal_add / journal_update / journal_list / journal_stats / journal_delete → local trade journal + stats
+Strategy & data:
+- strategy_optimize → grid-search strategy inputs, ranked by metric
+- data_export → CSV/JSON export of ohlcv, trades, strategy, equity, journal
+
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
 - ALWAYS use study_filter on pine tools when you know which indicator you want
@@ -84,6 +100,8 @@ registerWatchlistTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
+registerAnalysisTools(server);
+registerJournalTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');

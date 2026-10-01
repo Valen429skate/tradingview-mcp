@@ -69,6 +69,13 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
 - **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
+- **Local analysis** — compute RSI/ATR/EMA/BB/MACD/VWAP from bars, auto-detect support/resistance and pivots, multi-timeframe trend alignment, symbol correlation
+- **Screener** — scan symbols or your watchlist with conditions like `rsi < 30 and close > ema200`
+- **Risk management** — position sizing with R-multiple targets, ATR stops and futures point values; draw the plan on the chart
+- **Smart alerts** — create alerts on the nearest Pine/auto-detected levels in one call
+- **Trade journal** — log trades locally and get win rate, profit factor, expectancy, R stats and breakdowns by setup/hour/mistake
+- **Strategy optimizer** — grid-search strategy inputs in the Strategy Tester, ranked by any metric
+- **Export** — OHLCV, trades, strategy metrics and journal to CSV/JSON
 
 ## Install with Claude Code
 
@@ -160,6 +167,11 @@ tv pine compile                    # compile Pine Script
 tv pane layout 2x2                 # 4-chart grid
 tv pane symbol 1 ES1!              # set pane symbol
 tv stream quote | jq '.close'      # monitor price changes
+tv levels                          # auto support/resistance + pivots
+tv mtf -t W,D,240,60               # multi-timeframe trend
+tv scan AAPL MSFT NVDA -c "rsi < 30 and close > ema200"
+tv risk -a 10000 -r 1 -e 100 -s 98 # position size
+tv journal stats                   # trading performance
 ```
 
 ### All Commands
@@ -180,6 +192,9 @@ tv replay start/step/stop/status/autoplay/trade
 tv stream quote/bars/values/lines/labels/tables/all
 tv ui click/keyboard/hover/scroll/find/eval/type/panel/fullscreen/mouse
 tv screenshot / discover / ui-state / range / scroll
+tv compute / levels / mtf / correlation / scan / risk / export / optimize
+tv alert levels
+tv journal add/update/delete/list/stats
 ```
 
 ## Streaming
@@ -216,8 +231,15 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
+| "Where are support and resistance?" | `data_get_key_levels` |
+| "Is the trend aligned across timeframes?" | `chart_multi_timeframe` |
+| "Find oversold stocks in my watchlist" | `batch_scan` with `condition: "rsi < 30"` |
+| "How many contracts for a 10-point stop?" | `risk_position_size` |
+| "Set alerts on my indicator's levels" | `alert_from_levels` (`dry_run: true` first) |
+| "Log this trade" / "How am I doing?" | `journal_add` / `journal_stats` |
+| "Find the best EMA length for my strategy" | `strategy_optimize` |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (98 MCP tools)
 
 ### Chart Reading
 
@@ -311,6 +333,21 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 | `ui_open_panel` / `ui_click` / `ui_evaluate` | UI automation |
 | `tv_launch` / `tv_health_check` / `tv_discover` | Connection management |
 
+### Analysis, Risk & Journal
+
+| Tool | What it does |
+|------|-------------|
+| `data_compute` | Compute sma/ema/rsi/atr/stdev/vwap/bb/macd from chart bars (no indicator on chart needed) |
+| `data_get_key_levels` | Previous day/bar H/L/C, classic pivots, swing support/resistance zones with touch counts |
+| `chart_multi_timeframe` | Trend, RSI, ATR, EMAs per timeframe + alignment bias (restores timeframe) |
+| `data_correlation` | Correlation matrix between symbols (log returns) |
+| `batch_scan` | Screener over symbols/watchlist with safe conditions (`rsi < 30 and rel_volume > 2`) |
+| `risk_position_size` | Quantity, risk, R targets, leverage; ATR stop; `draw: true` plots it |
+| `alert_from_levels` | Alerts on the nearest Pine levels and/or key levels (`dry_run` to preview) |
+| `journal_add` / `journal_update` / `journal_delete` / `journal_list` / `journal_stats` | Local trade journal (`journal/trades.json`, or `TV_JOURNAL_PATH`) with performance stats |
+| `strategy_optimize` | Grid-search strategy inputs, ranked by metric; restores originals unless `apply_best` |
+| `data_export` | Export ohlcv/trades/strategy/equity/journal to CSV/JSON in `exports/` |
+
 ## Context Management
 
 Tools return compact output by default to minimize context usage. For a typical "analyze my chart" workflow, total context is ~5-10KB instead of ~80KB.
@@ -341,11 +378,14 @@ The key flag: `--remote-debugging-port=9222`
 ## Testing
 
 ```bash
-# Requires TradingView running with --remote-debugging-port=9222
+# Unit tests — no TradingView needed (runs in CI)
+npm run test:unit
+
+# End-to-end — requires TradingView running with --remote-debugging-port=9222
 npm test
 ```
 
-29 tests covering: Pine Script static analysis, server-side compilation, and CLI routing.
+Unit tests cover Pine Script static analysis, CLI routing, input sanitization, replay, launch, indicator/history handling, and the analysis toolkit (indicator math, key levels, screener, risk, journal, export, optimizer).
 
 ## Architecture
 
@@ -353,7 +393,7 @@ npm test
 Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
 ```
 
-- **Transport**: MCP over stdio (84 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
+- **Transport**: MCP over stdio (98 tools) + CLI (`tv` command, 38 commands)
 - **Connection**: Chrome DevTools Protocol on localhost:9222
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
 - **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`

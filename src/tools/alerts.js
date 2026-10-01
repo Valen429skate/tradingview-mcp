@@ -24,4 +24,16 @@ export function registerAlertTools(server) {
     try { return jsonResult(await core.deleteAlerts({ alert_id, delete_all })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
+
+  server.tool('alert_from_levels', 'Create crossing alerts on the price levels closest to the current price — from Pine indicator lines (line.new) and/or auto-detected key levels (S/R, pivots, previous day H/L). Use dry_run=true to preview first.', {
+    source: z.enum(['pine', 'key_levels', 'both']).optional().describe('Where levels come from (default pine)'),
+    study_filter: z.string().optional().describe('For source=pine: indicator name substring'),
+    max_alerts: z.coerce.number().optional().describe('Max alerts to create (default 5, max 20)'),
+    max_distance_pct: z.coerce.number().optional().describe('Only levels within this % of price (default 5)'),
+    message_prefix: z.string().optional().describe('Prefix for alert messages'),
+    dry_run: z.coerce.boolean().optional().describe('Preview the levels without creating alerts'),
+  }, async (args) => {
+    try { return jsonResult(await core.createFromLevels(args)); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
 }

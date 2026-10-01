@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-84 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+98 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
 
 ## Decision Tree — Which Tool When
 
@@ -80,6 +80,27 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 - `ui_fullscreen` → toggle fullscreen
 - `capture_screenshot` → take a screenshot (regions: "full", "chart", "strategy_tester")
 
+### "Analyze levels / trend / risk" (computed locally from bars)
+- `data_get_key_levels` → support/resistance zones, pivots, previous day H/L/C, nearest levels
+- `chart_multi_timeframe` → trend/RSI/ATR per timeframe + `alignment.bias` (restores timeframe)
+- `data_compute` with `indicators: ["rsi:14", "atr", "ema:200"]` → values without adding indicators to the chart
+- `data_correlation` with `symbols: [...]` → correlation matrix
+- `batch_scan` with `condition: "rsi < 30 and close > ema200"` → screener (omit `symbols` to scan the open watchlist)
+- `risk_position_size` → quantity/risk/targets; `point_value` for futures (ES=50, NQ=20); `draw: true` plots entry/stop/TPs
+
+### "Set alerts on my levels"
+- `alert_from_levels` with `dry_run: true` first → show the user the planned levels, then call again without `dry_run`
+
+### "Journal / performance"
+- `journal_add` → log a trade (symbol, side, entry, stop, exit…); `journal_update` with `id` to add the exit later
+- `journal_stats` → win rate, profit factor, expectancy, avg R, drawdown, by setup/hour/weekday/mistake
+- `data_export` with `type: "journal" | "ohlcv" | "trades" | "strategy"` → CSV/JSON in `exports/`
+
+### "Optimize my strategy"
+1. `chart_get_state` → strategy entity ID
+2. `data_get_indicator` → input ids (`in_0`, `in_1`, …) and current values
+3. `strategy_optimize` with `params: '{"in_0": [10, 20, 30]}'` and `metric` → ranked results (originals restored unless `apply_best: true`). Warn the user that results are in-sample.
+
 ### "TradingView isn't running"
 - `tv_launch` → auto-detect and launch TradingView with CDP on Mac/Win/Linux
 - `tv_health_check` → verify connection is working
@@ -109,6 +130,10 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 | `data_get_ohlcv` (summary) | ~500 bytes |
 | `data_get_ohlcv` (100 bars) | ~8 KB |
 | `capture_screenshot` | ~300 bytes (returns file path, not image data) |
+| `data_get_key_levels` | ~2-4 KB |
+| `chart_multi_timeframe` | ~1-2 KB |
+| `batch_scan` | ~300 bytes per symbol |
+| `risk_position_size` | ~700 bytes |
 
 ## Tool Conventions
 
